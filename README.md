@@ -1,5 +1,7 @@
 # SCADA Scanner and Fingerprinter
 
+![image](https://github.com/user-attachments/assets/055c8128-135c-4521-ad3c-0e905308cf84)
+
 ## Overview
 A high-performance, asynchronous SCADA/ICS scanner for identifying and fingerprinting industrial control systems across networks. Detects vulnerabilities, identifies vendors/products, and generates comprehensive risk reports.
 
