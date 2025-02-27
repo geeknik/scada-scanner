@@ -47,9 +47,6 @@ cd scada-scanner
 
 # Install dependencies
 pip install -r requirements.txt
-
-# Make executable (Linux/macOS)
-chmod +x scada_scanner.py
 ```
 
 ## Usage
