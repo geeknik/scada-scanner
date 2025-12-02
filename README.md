@@ -127,7 +127,17 @@ Optional arguments:
             "vendor": "Schneider",
             "product": "M340",
             "version": "2.6.0",
-            "risk_score": 0.75
+            "risk_score": 0.75,
+            "evidence": [
+              "response:00010000000101",
+              "port_hint:502"
+            ],
+            "findings": [
+              "Detected MODBUS protocol (confidence: 0.55)",
+              "Identified vendor: SCHNEIDER, product: M340",
+              "Overall risk assessment: High (score: 0.75)"
+            ],
+            "unexpected_port": false
           }
         }
       ],
