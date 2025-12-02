@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -79,3 +80,25 @@ def test_unexpected_port_sets_flag_and_finding(scanner):
     assert fp["unexpected_port"] is True
     assert any("unexpected port" in f.lower() for f in fp["findings"])
     assert fp["risk_score"] >= INSECURE_PROTOCOL_BASE_RISK["MODBUS"]
+
+
+def test_vulnx_lookup_parses_results(scanner, monkeypatch):
+    sample = [{"id": "CVE-2024-9999", "description": "Sample vuln", "severity": "high"}]
+
+    class DummyProc:
+        def __init__(self):
+            self.returncode = 0
+
+        async def communicate(self):
+            return json.dumps(sample).encode(), b""
+
+    async def fake_exec(*args, **kwargs):  # pylint: disable=unused-argument
+        return DummyProc()
+
+    monkeypatch.setattr(scanner, "_vulnx_available", lambda: True)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+
+    vulns = asyncio.run(scanner._lookup_vulnx_vulns("MODBUS", "Schneider", "M340", "2.6.0"))
+    assert vulns
+    assert vulns[0]["cve_id"] == "CVE-2024-9999"
+    assert vulns[0]["source"] == "vulnx"
