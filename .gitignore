@@ -6,6 +6,13 @@ __pycache__/
 # C extensions
 *.so
 
+# Scanner artifacts
+scan_results.*
+scada_scanner.log
+*.pcap
+*.pcapng
+*.nmap
+
 # Distribution / packaging
 .Python
 build/

@@ -18,9 +18,10 @@ A high-performance, asynchronous SCADA/ICS scanner for identifying and fingerpri
 
 ### Technical Highlights
 - Multi-threaded architecture with configurable concurrency
+- Token-bucket rate limiting to respect global request caps
 - Rate limiting and per-host connection controls
 - Behavioral fingerprinting through protocol-specific probes
-- Detailed logging and comprehensive JSON reports
+- Detailed logging and comprehensive JSON/CSV reports
 
 ### Supported Protocols
 - Modbus TCP
@@ -61,6 +62,12 @@ python scada_scanner.py -c 192.168.1.0/24 -o results.json
 
 # Multiple CIDR ranges from file
 python scada_scanner.py -f networks.txt -o results.json
+
+# Export CSV instead of JSON
+python scada_scanner.py -t 192.168.1.100 --format csv -o results.csv
+
+# Respect an exclude list
+python scada_scanner.py -c 10.0.0.0/24 --exclude exclude.txt
 ```
 
 ### Command Line Options
@@ -146,6 +153,13 @@ This tool is intended for authorized security assessments only. Unauthorized sca
 - Scan during maintenance windows when possible
 - Respect rate limits to avoid DoS conditions
 - Consider the fragility of industrial systems
+
+## Testing
+
+Run the unit test suite:
+```bash
+pytest
+```
 
 ## Developer Documentation
 

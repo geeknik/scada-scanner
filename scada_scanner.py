@@ -31,6 +31,7 @@ import time
 import ssl
 import hashlib
 import random
+import csv
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple, Set, Any, Union
 from dataclasses import dataclass, field
@@ -61,6 +62,8 @@ class ScanConfig:
     verbosity: int = 1
     exclude_ips: List[str] = field(default_factory=list)
     scan_delay: float = 0.1  # seconds between requests to same host
+    output_format: str = "json"
+    show_banner: bool = True  # helpful to silence during tests
 
 @dataclass
 class Vulnerability:
@@ -87,6 +90,32 @@ class Vulnerability:
             "references": self.references,
             "exploitability": self.exploitability
         }
+
+class TokenBucket:
+    """Simple async token bucket for global rate limiting"""
+    def __init__(self, rate: float, capacity: int):
+        self.rate = max(rate, 0.1)  # avoid division by zero
+        self.capacity = max(capacity, 1)
+        self.tokens = float(self.capacity)
+        self.updated_at = time.monotonic()
+        self._lock = asyncio.Lock()
+
+    async def acquire(self) -> None:
+        """Wait until a token is available"""
+        while True:
+            async with self._lock:
+                now = time.monotonic()
+                elapsed = now - self.updated_at
+                self.tokens = min(self.capacity, self.tokens + elapsed * self.rate)
+                self.updated_at = now
+
+                if self.tokens >= 1.0:
+                    self.tokens -= 1.0
+                    return
+
+                # Need to wait for more tokens; compute outside lock
+                wait_time = (1.0 - self.tokens) / self.rate
+            await asyncio.sleep(wait_time)
 
 @dataclass
 class PortProtocol:
@@ -212,7 +241,54 @@ PROTOCOL_SIGNATURES = {
             rb'ACK[\x00-\xff]',  # OPC UA Acknowledge
             rb'MSG[\x00-\xff]'   # OPC UA Message
         ]
+    },
+    'FOX': {
+        'patterns': [
+            rb'Fox [0-9]+\.[0-9]+\.[0-9]+',
+            rb'Tridium',
+            rb'Niagara'
+        ],
+        'responses': [
+            rb'fo\x78',  # "fox" magic
+        ]
+    },
+    'IEC104': {
+        'patterns': [
+            rb'\x68[\x00-\xff]{3}\x00',  # Start frame with 0 control field
+            rb'\x68\x04[\x00-\xff]{2}\x00'
+        ],
+        'responses': [
+            rb'\x68\x04\x0b\x00\x00\x00',
+            rb'\x68\x04\x43\x00\x00\x00'
+        ]
+    },
+    'CODESYS': {
+        'patterns': [
+            rb'CoDeSys',
+            rb'CodesysControl',
+            rb'5353[\x00-\xff]{2}\x00'  # SSCAN header
+        ],
+        'responses': [
+            rb'V3\.[0-9]',
+            rb'V2\.[0-9]'
+        ]
     }
+}
+
+PROTOCOL_VENDOR_HINTS = {
+    'S7': 'SIEMENS',
+    'FOX': 'SCHNEIDER',  # Tridium builds on Schneider/Johnson Controls gear
+    'EIP': 'ROCKWELL'
+}
+
+INSECURE_PROTOCOL_BASE_RISK = {
+    'MODBUS': 0.25,
+    'S7': 0.2,
+    'DNP3': 0.25,
+    'BACNET': 0.2,
+    'IEC104': 0.2,
+    'EIP': 0.15,
+    'FOX': 0.15
 }
 
 # Known vendor fingerprints
@@ -409,14 +485,17 @@ class SCADAScanner:
         self.scanned_hosts: Set[str] = set()
         self.rate_limiter = asyncio.Semaphore(self.config.max_concurrent)
         self.host_locks: Dict[str, asyncio.Lock] = {}
+        self.token_bucket = TokenBucket(self.config.rate_limit, self.config.max_concurrent)
         
         # Print banner and configuration info
-        self._print_banner()
+        if self.config.show_banner:
+            self._print_banner()
         logger.info(f"Scanner initialized with configuration:")
         logger.info(f"  - Rate limit: {config.rate_limit} req/s")
         logger.info(f"  - Timeout: {config.timeout}s")
         logger.info(f"  - Max concurrent: {config.max_concurrent}")
         logger.info(f"  - Safe mode: {'Enabled' if config.safe_mode else 'Disabled'}")
+        logger.info(f"  - Output format: {config.output_format}")
         
         if config.safe_mode:
             logger.info("Safe mode enabled: Using non-intrusive probes only")
@@ -514,6 +593,9 @@ class SCADAScanner:
                 connection_id = f"{random.randint(1000, 9999)}"
                 
                 logger.debug(f"Probing {ip}:{port.port} ({port.protocol}) - Attempt {attempt+1}/{self.config.max_retries}")
+
+                # Respect global rate limiter
+                await self.token_bucket.acquire()
                 
                 # Create a socket connection with timeout
                 reader, writer = await asyncio.wait_for(
@@ -598,6 +680,8 @@ class SCADAScanner:
             
             # Identify protocol
             protocol_details = self._identify_protocol(response_bytes)
+            if not protocol_details:
+                protocol_details = self._protocol_hint_from_port(port)
             if protocol_details:
                 fingerprint['protocol'] = protocol_details['protocol']
                 fingerprint['confidence'] = protocol_details['confidence']
@@ -615,6 +699,11 @@ class SCADAScanner:
                 # Add vendor findings
                 finding = f"Identified vendor: {vendor_details['vendor']}, product: {vendor_details['product']}"
                 fingerprint['findings'].append(finding)
+            else:
+                hinted_vendor = self._vendor_hint_from_protocol(fingerprint['protocol'])
+                if hinted_vendor:
+                    fingerprint['vendor'] = hinted_vendor
+                    fingerprint['findings'].append(f"Vendor inferred from protocol/port: {hinted_vendor}")
             
             # Advanced behavioral analysis if not in safe mode
             if not self.config.safe_mode:
@@ -656,6 +745,9 @@ class SCADAScanner:
             # Calculate risk score based on vulnerabilities and other factors
             risk_score = self._calculate_risk_score(fingerprint)
             fingerprint['risk_score'] = risk_score
+            if fingerprint['protocol'] in INSECURE_PROTOCOL_BASE_RISK:
+                fingerprint['findings'].append(
+                    f"{fingerprint['protocol']} is insecure by design (unencrypted/unauthenticated)")
             
             # Add overall risk assessment
             risk_level = "Low"
@@ -715,6 +807,19 @@ class SCADAScanner:
             }
         
         return None
+
+    def _protocol_hint_from_port(self, port: PortProtocol) -> Optional[Dict]:
+        """Fallback protocol hint based purely on well-known ports"""
+        if port and port.service:
+            return {
+                'protocol': port.service,
+                'confidence': 0.35  # less than passive match, but still useful
+            }
+        return None
+
+    def _vendor_hint_from_protocol(self, protocol: str) -> Optional[str]:
+        """Infer vendor based on protocol-only signals when responses are sparse"""
+        return PROTOCOL_VENDOR_HINTS.get(protocol)
 
     def _identify_vendor(self, response: bytes) -> Optional[Dict]:
         """Identify vendor and product from response patterns"""
@@ -1307,6 +1412,11 @@ class SCADAScanner:
     def _calculate_risk_score(self, fingerprint: Dict) -> float:
         """Calculate risk score based on vulnerabilities and other factors"""
         score = 0.0
+        protocol = fingerprint.get('protocol', '')
+
+        # Base protocol risk for insecure-by-design ICS protocols
+        if protocol in INSECURE_PROTOCOL_BASE_RISK:
+            score += INSECURE_PROTOCOL_BASE_RISK[protocol]
         
         # Contribution from vulnerabilities
         vulnerabilities = fingerprint.get('vulnerabilities', [])
@@ -1369,6 +1479,8 @@ class SCADAScanner:
         """Send probe data to target and get response"""
         for attempt in range(self.config.max_retries):
             try:
+                await self.token_bucket.acquire()
+
                 reader, writer = await asyncio.wait_for(
                     asyncio.open_connection(ip, port),
                     timeout=self.config.timeout
@@ -1531,11 +1643,13 @@ class SCADAScanner:
                 'raw_results': results
             }
             
-            # Write to file
-            with open(output_file, 'w') as f:
-                json.dump(report, f, indent=2)
-            
-            logger.info(f"Report generated: {output_file}")
+            # Write to requested format
+            if self.config.output_format == 'csv':
+                self._write_csv_report(hosts, output_file)
+            else:
+                with open(output_file, 'w') as f:
+                    json.dump(report, f, indent=2)
+                logger.info(f"Report generated: {output_file}")
             
             # Print summary to console
             print("\n===== SCAN SUMMARY =====")
@@ -1547,6 +1661,32 @@ class SCADAScanner:
             
         except Exception as e:
             logger.error(f"Error generating report: {str(e)}")
+
+    def _write_csv_report(self, hosts: Dict[str, Dict], output_file: str) -> None:
+        """Emit CSV report for easier triage/import"""
+        rows = []
+        for host in hosts.values():
+            for port in host['ports']:
+                fp = port.get('fingerprint', {})
+                vulnerabilities = fp.get('vulnerabilities', [])
+                rows.append({
+                    'ip': host['ip'],
+                    'port': port.get('port'),
+                    'protocol': fp.get('protocol', port.get('protocol')),
+                    'vendor': fp.get('vendor', 'Unknown'),
+                    'product': fp.get('product', 'Unknown'),
+                    'version': fp.get('version', 'Unknown'),
+                    'risk_score': fp.get('risk_score', 0.0),
+                    'vulnerabilities': ";".join(v.get('cve_id', '') for v in vulnerabilities),
+                    'findings': "; ".join(fp.get('findings', []))
+                })
+
+        fieldnames = ['ip', 'port', 'protocol', 'vendor', 'product', 'version', 'risk_score', 'vulnerabilities', 'findings']
+        with open(output_file, 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+        logger.info(f"CSV report generated: {output_file} ({len(rows)} rows)")
 
 async def scan_single_target(ip: str, config: ScanConfig) -> List[Dict]:
     """Scan a single target IP across all SCADA ports"""
@@ -1572,13 +1712,26 @@ async def scan_single_target(ip: str, config: ScanConfig) -> List[Dict]:
 
 async def main(args: argparse.Namespace) -> None:
     """Main execution function"""
+    exclude_ips: List[str] = []
+
+    if args.exclude:
+        try:
+            with open(args.exclude) as f:
+                exclude_ips = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+            logger.info(f"Loaded {len(exclude_ips)} IPs from exclude list")
+        except FileNotFoundError:
+            logger.error(f"Exclude file not found: {args.exclude}")
+            sys.exit(1)
+
     # Create scanner configuration
     config = ScanConfig(
         rate_limit=args.rate,
         timeout=args.timeout,
         max_concurrent=args.max_concurrent,
         safe_mode=args.safe_mode,
-        verbosity=args.verbosity
+        verbosity=args.verbosity,
+        exclude_ips=exclude_ips,
+        output_format=args.format
     )
     
     # Initialize scanner
