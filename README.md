@@ -72,6 +72,10 @@ python scada_scanner.py -c 10.0.0.0/24 --exclude exclude.txt
 
 # Highlight unexpected protocol/port combos (logged and in findings)
 python scada_scanner.py -t 203.0.113.10 -o results.json
+
+# Enable live vuln enrichment via ProjectDiscovery vulnx (requires vulnx + PDCP API key)
+vulnx auth
+python scada_scanner.py -t 192.168.1.100 --vulnx --vulnx-limit 3
 ```
 
 ### Command Line Options
@@ -145,7 +149,8 @@ Optional arguments:
         {
           "cve_id": "CVE-2020-12345",
           "description": "Authentication bypass in Modbus TCP",
-          "severity": "high"
+          "severity": "high",
+          "source": "local_db"
         }
       ]
     }
@@ -167,6 +172,16 @@ This tool is intended for authorized security assessments only. Unauthorized sca
 - Scan during maintenance windows when possible
 - Respect rate limits to avoid DoS conditions
 - Consider the fragility of industrial systems
+
+## Vulnerability Intelligence
+
+The scanner ships with a small built-in vulnerability database for core protocols (see `VULNERABILITY_DATABASE`). For fresher intel you can enable the optional [ProjectDiscovery vulnx](https://github.com/projectdiscovery/vulnx) integration:
+
+1. Install `vulnx` and configure your PDCP API key (`vulnx auth`).
+2. Run with `--vulnx` (optionally tune `--vulnx-limit` and `--vulnx-timeout`).
+3. Vulns from vulnx are merged with local findings and marked with `source: "vulnx"`.
+
+If `vulnx` is missing or unreachable, the scanner silently falls back to the local database.
 
 ## Testing
 

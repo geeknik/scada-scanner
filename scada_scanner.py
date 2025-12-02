@@ -32,6 +32,7 @@ import ssl
 import hashlib
 import random
 import csv
+import shutil
 from datetime import datetime, timezone
 from typing import List, Dict, Optional, Tuple, Set, Any, Union
 from dataclasses import dataclass, field
@@ -66,6 +67,9 @@ class ScanConfig:
     scan_delay: float = 0.1  # seconds between requests to same host
     output_format: str = "json"
     show_banner: bool = True  # helpful to silence during tests
+    use_vulnx: bool = False
+    vulnx_timeout: int = 15
+    vulnx_limit: int = 5
 
 @dataclass
 class Vulnerability:
@@ -90,7 +94,8 @@ class Vulnerability:
             "affected_products": self.affected_products,
             "disclosure_date": self.disclosure_date,
             "references": self.references,
-            "exploitability": self.exploitability
+            "exploitability": self.exploitability,
+            "source": "local_db"
         }
 
 class TokenBucket:
@@ -478,6 +483,21 @@ VULNERABILITY_DATABASE = {
     ]
 }
 
+def _unique_vulns(vulns: List[Dict]) -> List[Dict]:
+    """Deduplicate vulnerability dicts by CVE/ID"""
+    seen: Set[str] = set()
+    unique: List[Dict] = []
+    for vuln in vulns:
+        vid = vuln.get('cve_id') or vuln.get('id') or vuln.get('vulnerability_id')
+        if not vid:
+            unique.append(vuln)
+            continue
+        if vid in seen:
+            continue
+        seen.add(vid)
+        unique.append(vuln)
+    return unique
+
 class SCADAScanner:
     """Main scanner class implementing SCADA/ICS device detection and fingerprinting"""
     
@@ -498,6 +518,7 @@ class SCADAScanner:
         logger.info(f"  - Max concurrent: {config.max_concurrent}")
         logger.info(f"  - Safe mode: {'Enabled' if config.safe_mode else 'Disabled'}")
         logger.info(f"  - Output format: {config.output_format}")
+        logger.info(f"  - Vuln enrichment via vulnx: {'Enabled' if config.use_vulnx else 'Disabled'}")
         
         if config.safe_mode:
             logger.info("Safe mode enabled: Using non-intrusive probes only")
@@ -746,13 +767,29 @@ class SCADAScanner:
                 fingerprint['product'],
                 fingerprint['version']
             )
-            
-            # Convert vulnerability objects to dictionaries
-            fingerprint['vulnerabilities'] = [v.to_dict() for v in vulnerabilities]
+
+            # External enrichment via vulnx (ProjectDiscovery)
+            if self.config.use_vulnx:
+                vulnx_vulns = await self._lookup_vulnx_vulns(
+                    fingerprint['protocol'],
+                    fingerprint['vendor'],
+                    fingerprint['product'],
+                    fingerprint['version']
+                )
+            else:
+                vulnx_vulns = []
+
+            # Convert vulnerability objects to dictionaries and merge with external
+            merged_vulns: List[Dict] = [v.to_dict() for v in vulnerabilities] + vulnx_vulns
+            fingerprint['vulnerabilities'] = _unique_vulns(merged_vulns)
             
             # Add vulnerability findings
-            for vuln in vulnerabilities:
-                finding = f"Potential vulnerability: {vuln.cve_id} - {vuln.description} (Severity: {vuln.severity})"
+            for vuln in fingerprint['vulnerabilities']:
+                cve_id = vuln.get('cve_id') or vuln.get('id') or "Unknown"
+                desc = vuln.get('description', '')
+                sev = vuln.get('severity', 'unknown')
+                source = vuln.get('source', 'local_db')
+                finding = f"Potential vulnerability ({source}): {cve_id} - {desc} (Severity: {sev})"
                 fingerprint['findings'].append(finding)
             
             # Calculate risk score based on vulnerabilities and other factors
@@ -1410,6 +1447,82 @@ class SCADAScanner:
         
         return vulnerabilities
 
+    def _vulnx_available(self) -> bool:
+        """Check whether vulnx is present on the system"""
+        return shutil.which("vulnx") is not None
+
+    async def _lookup_vulnx_vulns(self, protocol: str, vendor: str, product: str, version: str) -> List[Dict]:
+        """Query vulnx (ProjectDiscovery) for live vulnerability intel"""
+        results: List[Dict] = []
+
+        if not self._vulnx_available():
+            logger.debug("vulnx not found on PATH; skipping external vuln lookup")
+            return results
+
+        # Build a loose search query; users can tighten results via vendor/product/version info
+        terms = []
+        for term in (vendor, product, protocol, version):
+            if term and term != 'Unknown':
+                terms.append(str(term))
+        if not terms:
+            return results
+        query = " ".join(terms)
+
+        cmd = [
+            "vulnx",
+            "search",
+            query,
+            "--json",
+            "--silent",
+            "--disable-update-check",
+        ]
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=self.config.vulnx_timeout)
+            if proc.returncode != 0:
+                logger.debug(f"vulnx search failed rc={proc.returncode} stderr={stderr.decode(errors='ignore')}")
+                return results
+
+            try:
+                parsed = json.loads(stdout.decode())
+            except json.JSONDecodeError:
+                logger.debug("Unable to parse vulnx output as JSON")
+                return results
+
+            # vulnx may wrap results; handle list/dict flexibly
+            if isinstance(parsed, dict) and 'vulnerabilities' in parsed:
+                parsed_list = parsed.get('vulnerabilities', [])
+            elif isinstance(parsed, list):
+                parsed_list = parsed
+            else:
+                parsed_list = [parsed]
+
+            for entry in parsed_list[: self.config.vulnx_limit]:
+                if not isinstance(entry, dict):
+                    continue
+                vuln = {
+                    'cve_id': entry.get('id') or entry.get('cve_id') or entry.get('vulnerability_id'),
+                    'description': entry.get('description', ''),
+                    'severity': entry.get('severity', entry.get('cvss', 'unknown')),
+                    'source': 'vulnx',
+                    'references': entry.get('references', []),
+                }
+                results.append(vuln)
+
+        except asyncio.TimeoutError:
+            logger.debug("vulnx search timed out")
+        except FileNotFoundError:
+            logger.debug("vulnx binary missing during lookup")
+        except Exception as e:
+            logger.debug(f"vulnx lookup error: {e}")
+
+        return results
+
     def _compare_versions(self, version1: str, version2: str) -> int:
         """Compare two version strings (e.g., "3.5.1" vs "3.6.0")"""
         try:
@@ -1765,7 +1878,10 @@ async def main(args: argparse.Namespace) -> None:
         safe_mode=args.safe_mode,
         verbosity=args.verbosity,
         exclude_ips=exclude_ips,
-        output_format=args.format
+        output_format=args.format,
+        use_vulnx=args.vulnx,
+        vulnx_timeout=args.vulnx_timeout,
+        vulnx_limit=args.vulnx_limit
     )
     
     # Initialize scanner
@@ -1824,6 +1940,9 @@ if __name__ == "__main__":
                         help='Verbosity level: 0=quiet, 1=normal, 2=debug (default: 1)')
     parser.add_argument('--format', choices=['json', 'csv'], default='json',
                         help='Output format (default: json)')
+    parser.add_argument('--vulnx', action='store_true', help='Enable external vulnerability enrichment via vulnx (ProjectDiscovery)')
+    parser.add_argument('--vulnx-timeout', type=int, default=15, help='Timeout for vulnx calls in seconds (default: 15)')
+    parser.add_argument('--vulnx-limit', type=int, default=5, help='Maximum vulnerabilities to ingest from vulnx (default: 5)')
     
     args = parser.parse_args()
     
