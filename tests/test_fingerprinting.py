@@ -8,10 +8,11 @@ import pytest
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from scada_scanner import (  # noqa: E402
+    INSECURE_PROTOCOL_BASE_RISK,
+    SCADA_PORTS,
     SCADAScanner,
     ScanConfig,
-    SCADA_PORTS,
-    INSECURE_PROTOCOL_BASE_RISK,
+    PortProtocol,
 )
 
 
@@ -34,6 +35,7 @@ def test_identify_protocol_modbus(scanner):
     proto = scanner._identify_protocol(response)
     assert proto is not None
     assert proto["protocol"] == "MODBUS"
+    assert proto["evidence"]
 
 
 def test_port_hint_used_when_no_signature(scanner):
@@ -43,6 +45,8 @@ def test_port_hint_used_when_no_signature(scanner):
     )
     assert fingerprint["protocol"] == "MODBUS"
     assert fingerprint["confidence"] >= 0.35
+    # Port hint is recorded as evidence
+    assert any("port_hint" in e for e in fingerprint.get("evidence", []))
 
 
 def test_vendor_identification_siemens(scanner):
@@ -62,3 +66,16 @@ def test_risk_score_includes_base_risk(scanner):
     }
     score = scanner._calculate_risk_score(fingerprint)
     assert score >= INSECURE_PROTOCOL_BASE_RISK["MODBUS"]
+
+
+def test_unexpected_port_sets_flag_and_finding(scanner):
+    modbus_like = b"\x00\x01\x00\x00\x00\x01\x01"
+    odd_port = PortProtocol(44818, "TCP", "EIP", "EtherNet/IP")
+    fp = asyncio.run(
+        scanner._fingerprint_service(
+            "127.0.0.1", odd_port, {"response": modbus_like.hex()}
+        )
+    )
+    assert fp["unexpected_port"] is True
+    assert any("unexpected port" in f.lower() for f in fp["findings"])
+    assert fp["risk_score"] >= INSECURE_PROTOCOL_BASE_RISK["MODBUS"]

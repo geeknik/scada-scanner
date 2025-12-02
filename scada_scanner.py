@@ -677,16 +677,20 @@ class SCADAScanner:
                 'vulnerabilities': [],
                 'risk_score': 0.0,
                 'behaviors': [],
-                'findings': []
+                'findings': [],
+                'evidence': [],
+                'unexpected_port': False
             }
             
             # Identify protocol
-            protocol_details = self._identify_protocol(response_bytes)
+            protocol_details = self._identify_protocol(response_bytes, port)
             if not protocol_details:
                 protocol_details = self._protocol_hint_from_port(port)
             if protocol_details:
                 fingerprint['protocol'] = protocol_details['protocol']
                 fingerprint['confidence'] = protocol_details['confidence']
+                if 'evidence' in protocol_details:
+                    fingerprint['evidence'].extend(protocol_details['evidence'])
                 
                 # Add protocol-specific findings
                 finding = f"Detected {protocol_details['protocol']} protocol (confidence: {protocol_details['confidence']})"
@@ -706,6 +710,13 @@ class SCADAScanner:
                 if hinted_vendor:
                     fingerprint['vendor'] = hinted_vendor
                     fingerprint['findings'].append(f"Vendor inferred from protocol/port: {hinted_vendor}")
+
+            expected_protocols = self._expected_protocols_for_port(port.port)
+            if expected_protocols and fingerprint['protocol'] not in expected_protocols:
+                fingerprint['unexpected_port'] = True
+                fingerprint['findings'].append(
+                    f"{fingerprint['protocol']} observed on unexpected port {port.port} (expected {', '.join(expected_protocols)})"
+                )
             
             # Advanced behavioral analysis if not in safe mode
             if not self.config.safe_mode:
@@ -773,39 +784,50 @@ class SCADAScanner:
                 'vulnerabilities': []
             }
 
-    def _identify_protocol(self, response: bytes) -> Optional[Dict]:
-        """Identify protocol from response patterns"""
+    def _identify_protocol(self, response: bytes, port_hint: Optional[PortProtocol] = None) -> Optional[Dict]:
+        """Identify protocol from response patterns with optional port-based weighting"""
         best_match = None
         highest_confidence = 0.0
+        best_evidence: List[str] = []
         
         for protocol, signatures in PROTOCOL_SIGNATURES.items():
             pattern_matches = 0
             response_matches = 0
+            evidence: List[str] = []
             
             # Check if response matches known patterns
             for pattern in signatures.get('patterns', []):
                 if re.search(pattern, response):
                     pattern_matches += 1
+                    evidence.append(f"pattern:{pattern.hex() if hasattr(pattern, 'hex') else pattern}")
             
             # Check if response matches known responses
             for resp_pattern in signatures.get('responses', []):
                 if re.search(resp_pattern, response):
                     response_matches += 1
+                    evidence.append(f"response:{resp_pattern.hex() if hasattr(resp_pattern, 'hex') else resp_pattern}")
             
             # Calculate confidence based on matches
             total_patterns = len(signatures.get('patterns', [])) + len(signatures.get('responses', []))
             if total_patterns > 0:
                 confidence = (pattern_matches + response_matches * 2) / (total_patterns * 2)
                 
+                # Port hint bonus when service matches protocol
+                if port_hint and port_hint.service == protocol and confidence > 0:
+                    confidence = min(1.0, confidence + 0.15)
+                    evidence.append(f"port_hint:{port_hint.port}")
+                
                 # Only consider if confidence is above threshold
                 if confidence > 0.2 and confidence > highest_confidence:
                     highest_confidence = confidence
                     best_match = protocol
+                    best_evidence = evidence
         
         if best_match:
             return {
                 'protocol': best_match,
-                'confidence': highest_confidence
+                'confidence': highest_confidence,
+                'evidence': best_evidence
             }
         
         return None
@@ -815,13 +837,18 @@ class SCADAScanner:
         if port and port.service:
             return {
                 'protocol': port.service,
-                'confidence': 0.35  # less than passive match, but still useful
+                'confidence': 0.35,  # less than passive match, but still useful
+                'evidence': [f"port_hint:{port.port}"]
             }
         return None
 
     def _vendor_hint_from_protocol(self, protocol: str) -> Optional[str]:
         """Infer vendor based on protocol-only signals when responses are sparse"""
         return PROTOCOL_VENDOR_HINTS.get(protocol)
+
+    def _expected_protocols_for_port(self, port_number: int) -> List[str]:
+        """Return list of expected protocols for a given port"""
+        return list({p.service for p in SCADA_PORTS if p.port == port_number})
 
     def _identify_vendor(self, response: bytes) -> Optional[Dict]:
         """Identify vendor and product from response patterns"""
@@ -1443,6 +1470,10 @@ class SCADAScanner:
         if version == 'Unknown':
             # Unknown version might indicate lack of security focus
             score += 0.1
+
+        # Contribution from anomalous port usage
+        if fingerprint.get('unexpected_port'):
+            score += 0.05
         
         # Contribution from behaviors
         behaviors = fingerprint.get('behaviors', [])
@@ -1680,10 +1711,11 @@ class SCADAScanner:
                     'version': fp.get('version', 'Unknown'),
                     'risk_score': fp.get('risk_score', 0.0),
                     'vulnerabilities': ";".join(v.get('cve_id', '') for v in vulnerabilities),
-                    'findings': "; ".join(fp.get('findings', []))
+                    'findings': "; ".join(fp.get('findings', [])),
+                    'evidence': "; ".join(fp.get('evidence', []))
                 })
 
-        fieldnames = ['ip', 'port', 'protocol', 'vendor', 'product', 'version', 'risk_score', 'vulnerabilities', 'findings']
+        fieldnames = ['ip', 'port', 'protocol', 'vendor', 'product', 'version', 'risk_score', 'vulnerabilities', 'findings', 'evidence']
         with open(output_file, 'w', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()

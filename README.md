@@ -21,6 +21,7 @@ A high-performance, asynchronous SCADA/ICS scanner for identifying and fingerpri
 - Token-bucket rate limiting to respect global request caps
 - Rate limiting and per-host connection controls
 - Behavioral fingerprinting through protocol-specific probes
+- Port-aware protocol heuristics with evidence trails for detections
 - Detailed logging and comprehensive JSON/CSV reports
 
 ### Supported Protocols
@@ -68,6 +69,9 @@ python scada_scanner.py -t 192.168.1.100 --format csv -o results.csv
 
 # Respect an exclude list
 python scada_scanner.py -c 10.0.0.0/24 --exclude exclude.txt
+
+# Highlight unexpected protocol/port combos (logged and in findings)
+python scada_scanner.py -t 203.0.113.10 -o results.json
 ```
 
 ### Command Line Options
