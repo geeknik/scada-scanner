@@ -102,3 +102,39 @@ def test_vulnx_lookup_parses_results(scanner, monkeypatch):
     assert vulns
     assert vulns[0]["cve_id"] == "CVE-2024-9999"
     assert vulns[0]["source"] == "vulnx"
+
+
+def test_local_vuln_db_matches_updated_entries(scanner):
+    vulns = scanner._check_vulnerabilities(
+        "MODBUS", "Socomec", "Socomec DIRIS Digiware M-70", "1.6.9"
+    )
+    cve_ids = {v.cve_id for v in vulns}
+    assert "CVE-2025-55221" in cve_ids
+
+
+def test_unique_vulns_deduplicates(monkeypatch):
+    from scada_scanner import _unique_vulns
+
+    data = [
+        {"cve_id": "CVE-1", "severity": "high"},
+        {"cve_id": "CVE-1", "severity": "high"},
+        {"id": "CVE-2", "severity": "medium"},
+    ]
+    unique = _unique_vulns(data)
+    assert len(unique) == 2
+
+
+def test_risk_score_unexpected_port_bump(scanner):
+    base_fp = {
+        "protocol": "MODBUS",
+        "vulnerabilities": [],
+        "version": "1.0",
+        "behaviors": [],
+        "unexpected_port": False,
+    }
+    bumped_fp = dict(base_fp)
+    bumped_fp["unexpected_port"] = True
+
+    base_score = scanner._calculate_risk_score(base_fp)
+    bumped_score = scanner._calculate_risk_score(bumped_fp)
+    assert bumped_score > base_score
