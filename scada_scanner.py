@@ -32,7 +32,7 @@ import ssl
 import hashlib
 import random
 import csv
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Optional, Tuple, Set, Any, Union
 from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor
@@ -47,6 +47,8 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+SCANNER_VERSION = "0.3"
 
 @dataclass
 class ScanConfig:
@@ -504,7 +506,7 @@ class SCADAScanner:
     
     def _print_banner(self) -> None:
         """Print scanner banner"""
-        banner = r"""
+        banner = fr"""
         _____  _____          _____                
        / ____|/ ____|   /\   |  __ \   /\          
       | (___ | |       /  \  | |  | | /  \         
@@ -516,7 +518,7 @@ class SCADAScanner:
   \___ \| |      / /\ \ | . ` | . ` |  __| |  _  / 
   ____) | |____ / ____ \| |\  | |\  | |____| | \ \ 
  |_____/ \_____/_/    \_\_| \_|_| \_|______|_|  \_\
-        Industrial Control Systems Scanner v0.2
+        Industrial Control Systems Scanner v{SCANNER_VERSION}
     [ For authorized security assessments only ]
         """
         print(banner)
@@ -551,8 +553,8 @@ class SCADAScanner:
                         
                         # Add metadata
                         result['metadata'] = {
-                            'scan_time': datetime.utcnow().isoformat(),
-                            'scanner_version': '2.0',
+                            'scan_time': datetime.now(timezone.utc).isoformat(),
+                            'scanner_version': SCANNER_VERSION,
                             'risk_score': fingerprint.get('risk_score', 0)
                         }
                         
@@ -634,7 +636,7 @@ class SCADAScanner:
                         'protocol': port.protocol,
                         'response': response.hex(),
                         'response_hash': response_hash,
-                        'timestamp': datetime.utcnow().isoformat(),
+                        'timestamp': datetime.now(timezone.utc).isoformat(),
                         'connection_id': connection_id
                     }
                 else:
@@ -1633,7 +1635,7 @@ class SCADAScanner:
             # Create report structure
             report = {
                 'scan_summary': {
-                    'timestamp': datetime.utcnow().isoformat(),
+                    'timestamp': datetime.now(timezone.utc).isoformat(),
                     'total_hosts_scanned': len(hosts),
                     'hosts_with_scada': sum(1 for host in hosts.values() if host['ports']),
                     'total_vulnerabilities': sum(len(host['vulnerabilities']) for host in hosts.values()),
