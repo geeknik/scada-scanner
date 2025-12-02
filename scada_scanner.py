@@ -403,82 +403,168 @@ VENDOR_FINGERPRINTS = {
 VULNERABILITY_DATABASE = {
     'MODBUS': [
         Vulnerability(
-            cve_id="CVE-2018-10621",
-            description="Modbus TCP buffer overflow vulnerability in specific implementations",
+            cve_id="CVE-2025-55221",
+            description="Socomec DIRIS Digiware M-70 DoS via crafted Modbus TCP/RTU over TCP packets on 502/503",
             severity="high",
-            affected_versions=["*"],
-            affected_products=["Multiple Vendors"],
-            disclosure_date="2018-05-03",
-            references=["https://nvd.nist.gov/vuln/detail/CVE-2018-10621"],
+            affected_versions=["1.6.9", "<=1.6.9"],
+            affected_products=["Socomec DIRIS Digiware M-70"],
+            disclosure_date="2025-12-01",
+            references=["https://talosintelligence.com/vulnerability_reports/TALOS-2025-2251"],
             exploitability=0.7
         ),
         Vulnerability(
-            cve_id="CVE-2019-12623",
-            description="Unauthenticated Modbus TCP command execution",
-            severity="critical",
-            affected_versions=["<3.5"],
-            affected_products=["Multiple PLCs"],
-            disclosure_date="2019-07-12",
-            references=["https://nvd.nist.gov/vuln/detail/CVE-2019-12623"],
-            exploitability=0.8
+            cve_id="CVE-2025-54848",
+            description="Socomec DIRIS Digiware M-70 DoS via unauthenticated Modbus TCP Write Single Register",
+            severity="high",
+            affected_versions=["1.6.9", "<=1.6.9"],
+            affected_products=["Socomec DIRIS Digiware M-70"],
+            disclosure_date="2025-12-01",
+            references=["https://talosintelligence.com/vulnerability_reports/TALOS-2025-2248"],
+            exploitability=0.6
         )
     ],
     'S7': [
         Vulnerability(
-            cve_id="CVE-2020-15782",
-            description="Improper Access Control in Siemens SIMATIC S7-1200 and S7-1500 CPU",
-            severity="critical",
-            affected_versions=["<V4.2.3"],
-            affected_products=["Siemens SIMATIC S7-1200", "Siemens SIMATIC S7-1500"],
-            disclosure_date="2020-07-14",
-            references=["https://cert-portal.siemens.com/productcert/pdf/ssa-434534.pdf"],
-            exploitability=0.9
+            cve_id="CVE-2025-24811",
+            description="SIMATIC S7-1200 CPU DoS via crafted packets to 80/tcp",
+            severity="high",
+            affected_versions=["<V4.7"],
+            affected_products=["Siemens SIMATIC S7-1200 family"],
+            disclosure_date="2025-02-11",
+            references=["https://cert-portal.siemens.com/productcert/html/ssa-224824.html"],
+            exploitability=0.6
         ),
         Vulnerability(
-            cve_id="CVE-2019-10915",
-            description="Authentication bypass in S7 protocol implementation",
+            cve_id="CVE-2025-24812",
+            description="SIMATIC S7-1200 CPU DoS via crafted packets to 102/tcp",
+            severity="medium",
+            affected_versions=["<V4.7"],
+            affected_products=["Siemens SIMATIC S7-1200 family"],
+            disclosure_date="2025-02-11",
+            references=["https://cert-portal.siemens.com/productcert/html/ssa-224824.html"],
+            exploitability=0.5
+        ),
+        Vulnerability(
+            cve_id="CVE-2024-47100",
+            description="SIMATIC S7-1200 cross-site request forgery in web interface allows CPU mode change",
             severity="high",
-            affected_versions=["<V4.0"],
-            affected_products=["Siemens SIMATIC S7-300", "Siemens SIMATIC S7-400"],
-            disclosure_date="2019-04-09",
-            references=["https://nvd.nist.gov/vuln/detail/CVE-2019-10915"],
-            exploitability=0.7
+            affected_versions=["*"],
+            affected_products=["Siemens SIMATIC S7-1200 family"],
+            disclosure_date="2025-01-14",
+            references=["https://cert-portal.siemens.com/productcert/html/ssa-717113.html"],
+            exploitability=0.4
         )
     ],
     'DNP3': [
         Vulnerability(
-            cve_id="CVE-2013-2800",
-            description="Buffer overflow in DNP3 protocol implementations",
-            severity="high",
+            cve_id="CVE-2023-30756",
+            description="Siemens SIMATIC CP/HMI/WinCC DNP3 stack DoS via Expect header null dereference",
+            severity="medium",
+            affected_versions=["<3.5.20", "<2.4.8"],
+            affected_products=["SIMATIC CP 1242-7", "CP 1243-1 DNP3", "WinCC Runtime Advanced"],
+            disclosure_date="2024-09-10",
+            references=["https://cert-portal.siemens.com/productcert/html/ssa-423808.html"],
+            exploitability=0.5
+        ),
+        Vulnerability(
+            cve_id="CVE-2023-28827",
+            description="SIMATIC CP/HMI/WinCC DNP3 web server DoS via crafted requests",
+            severity="medium",
             affected_versions=["*"],
-            affected_products=["Multiple DNP3 Devices"],
-            disclosure_date="2013-06-14",
-            references=["https://nvd.nist.gov/vuln/detail/CVE-2013-2800"],
-            exploitability=0.6
+            affected_products=["SIMATIC CP 1242-7", "CP 1243-1 DNP3", "WinCC Runtime Advanced"],
+            disclosure_date="2024-09-10",
+            references=["https://cert-portal.siemens.com/productcert/html/ssa-423808.html"],
+            exploitability=0.5
         )
     ],
     'BACNET': [
         Vulnerability(
-            cve_id="CVE-2020-12556",
-            description="Denial of Service vulnerability in BACnet protocol implementation",
-            severity="medium",
+            cve_id="CVE-2025-0658",
+            description="Automated Logic/Carrier Zone Controller DoS via malformed BACnet packets",
+            severity="high",
             affected_versions=["*"],
-            affected_products=["Multiple BACnet Devices"],
-            disclosure_date="2020-05-12",
-            references=["https://nvd.nist.gov/vuln/detail/CVE-2020-12556"],
+            affected_products=["Automated Logic / Carrier Zone Controller"],
+            disclosure_date="2025-11-27",
+            references=["https://www.corporate.carrier.com/product-security/advisories-resources/"],
+            exploitability=0.6
+        ),
+        Vulnerability(
+            cve_id="CVE-2020-36872",
+            description="BACnet Test Server BVLC length mishandling leads to crash",
+            severity="medium",
+            affected_versions=["<=1.01"],
+            affected_products=["BACnet Test Server"],
+            disclosure_date="2025-11-26",
+            references=["https://www.vulncheck.com/advisories/bacnet-test-server-malformed-bvlc-length-dos"],
             exploitability=0.5
         )
     ],
     'EIP': [
         Vulnerability(
-            cve_id="CVE-2018-19282",
-            description="Improper authentication in EtherNet/IP protocol implementation",
+            cve_id="CVE-2025-9178",
+            description="Rockwell 1715 EtherNet/IP Adapter CIP DoS via crafted payloads",
+            severity="medium",
+            affected_versions=["*"],
+            affected_products=["Rockwell 1715 EtherNet/IP Adapter"],
+            disclosure_date="2025-10-14",
+            references=["https://www.rockwellautomation.com/en-us/trust-center/security-advisories/advisory.SD1757.html"],
+            exploitability=0.4
+        )
+    ],
+    'IEC104': [
+        Vulnerability(
+            cve_id="CVE-2023-6711",
+            description="RTU500 IEC 60870-5-104 buffer overflow allows reboot/DoS",
+            severity="medium",
+            affected_versions=["*"],
+            affected_products=["Hitachi Energy RTU500"],
+            disclosure_date="2023-12-19",
+            references=["https://publisher.hitachienergy.com/preview?DocumentId=8DBD000184&languageCode=en&Preview=true"],
+            exploitability=0.5
+        )
+    ],
+    'OPCUA': [
+        Vulnerability(
+            cve_id="CVE-2024-42512",
+            description="OPC UA .NET Standard Stack auth bypass when Basic128Rsa15 enabled",
+            severity="high",
+            affected_versions=["<1.5.374.158"],
+            affected_products=["OPC UA .NET Standard Stack"],
+            disclosure_date="2025-02-10",
+            references=["https://files.opcfoundation.org/SecurityBulletins/OPC%20Foundation%20Security%20Bulletin%20CVE-2024-42512.pdf"],
+            exploitability=0.6
+        ),
+        Vulnerability(
+            cve_id="CVE-2024-42513",
+            description="OPC UA .NET Standard HTTPS endpoint authentication bypass",
+            severity="medium",
+            affected_versions=["<1.5.374.158"],
+            affected_products=["OPC UA .NET Standard Stack"],
+            disclosure_date="2025-02-10",
+            references=["https://files.opcfoundation.org/SecurityBulletins/OPC%20Foundation%20Security%20Bulletin%20CVE-2024-42513.pdf"],
+            exploitability=0.5
+        )
+    ],
+    'CODESYS': [
+        Vulnerability(
+            cve_id="CVE-2025-41738",
+            description="CODESYS Control runtime DoS via type confusion in visualization server",
             severity="high",
             affected_versions=["*"],
-            affected_products=["Multiple EtherNet/IP Devices"],
-            disclosure_date="2018-12-03",
-            references=["https://nvd.nist.gov/vuln/detail/CVE-2018-19282"],
-            exploitability=0.7
+            affected_products=["CODESYS Control runtime"],
+            disclosure_date="2025-12-01",
+            references=["https://certvde.com/de/advisories/VDE-2025-100"],
+            exploitability=0.5
+        ),
+        Vulnerability(
+            cve_id="CVE-2025-41739",
+            description="CODESYS Control runtime DoS via out-of-bounds read race in comms servers",
+            severity="medium",
+            affected_versions=["*"],
+            affected_products=["CODESYS Control runtime"],
+            disclosure_date="2025-12-01",
+            references=["https://certvde.com/de/advisories/VDE-2025-099"],
+            exploitability=0.5
         )
     ]
 }

@@ -147,8 +147,8 @@ Optional arguments:
       ],
       "vulnerabilities": [
         {
-          "cve_id": "CVE-2020-12345",
-          "description": "Authentication bypass in Modbus TCP",
+          "cve_id": "CVE-2025-55221",
+          "description": "Socomec DIRIS Digiware M-70 DoS via crafted Modbus TCP/RTU over TCP packets",
           "severity": "high",
           "source": "local_db"
         }
@@ -182,6 +182,7 @@ The scanner ships with a small built-in vulnerability database for core protocol
 3. Vulns from vulnx are merged with local findings and marked with `source: "vulnx"`.
 
 If `vulnx` is missing or unreachable, the scanner silently falls back to the local database.
+Local database entries are periodically refreshed from vulnx searches for core protocols (captured in this repo snapshot) and are tagged with `source: "local_db"`.
 
 ## Testing
 
